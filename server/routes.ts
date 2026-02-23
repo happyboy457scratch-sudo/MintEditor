@@ -13,6 +13,8 @@ const openai = new OpenAI({
   baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
 });
 
+import { createPaypalOrder, capturePaypalOrder, loadPaypalDefault } from "./paypal";
+
 // Helper to get user ID or session ID
 function getUserOrSession(req: any): { userId?: string; sessionId?: string } {
   const userId = req.user?.claims?.sub;
@@ -543,7 +545,7 @@ export async function registerRoutes(
   });
 
   // Subscription
-  app.get(api.subscription.get.path, isAuthenticated, async (req: any, res) => {
+  app.get("/api/subscription", isAuthenticated, async (req: any, res) => {
     try {
       const userId = req.user.claims.sub;
       
@@ -562,11 +564,42 @@ export async function registerRoutes(
     }
   });
 
+  // PayPal Routes
+  app.get("/api/paypal/setup", async (req, res) => {
+    await loadPaypalDefault(req, res);
+  });
+
+  app.post("/api/paypal/order", async (req, res) => {
+    await createPaypalOrder(req, res);
+  });
+
+  app.post("/api/paypal/order/:orderID/capture", async (req, res) => {
+    await capturePaypalOrder(req, res);
+  });
+
+  app.post("/api/subscription/confirm-paypal", isAuthenticated, async (req: any, res) => {
+    try {
+      const { tier } = req.body;
+      const userId = req.user.claims.sub;
+      
+      const subscription = await storage.createOrUpdateSubscription({
+        userId,
+        tier: tier as any,
+        updatedAt: new Date(),
+      });
+      
+      res.json(subscription);
+    } catch (error) {
+      console.error("Error confirming paypal subscription:", error);
+      res.status(500).json({ message: "Failed to confirm subscription" });
+    }
+  });
+
   app.post(api.subscription.create.path, isAuthenticated, async (req: any, res) => {
     try {
       const input = api.subscription.create.input.parse(req.body);
       
-      // For now, return a placeholder - Stripe integration will be added separately
+      // For now, return a placeholder - Stripe integration was replaced by PayPal
       res.json({
         checkoutUrl: `/subscription/upgrade?tier=${input.tier}`,
       });

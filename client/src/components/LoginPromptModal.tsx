@@ -44,13 +44,13 @@ export function LoginPromptModal({ onClose, isOpen, isExpired = false }: LoginPr
           </p>
           
           <div className="w-full space-y-3">
-            <a 
-              href="/api/login"
+            <button 
+              onClick={() => window.location.href = `/api/login?redirect=${encodeURIComponent(window.location.pathname)}`}
               className="w-full flex items-center justify-center gap-2 py-3 bg-primary text-primary-foreground rounded-xl font-semibold shadow-lg shadow-primary/25 hover:shadow-xl hover:shadow-primary/30 hover:-translate-y-0.5 active:translate-y-0 transition-all duration-200"
             >
               <LogIn className="w-4 h-4" />
               Sign In with Replit
-            </a>
+            </button>
             
             {!isExpired && (
               <button 

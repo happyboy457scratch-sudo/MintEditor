@@ -104,16 +104,26 @@ export async function setupAuth(app: Express) {
 
   app.get("/api/login", (req, res, next) => {
     ensureStrategy(req.hostname);
+    const redirect = req.query.redirect as string;
     passport.authenticate(`replitauth:${req.hostname}`, {
       prompt: "login consent",
       scope: ["openid", "email", "profile", "offline_access"],
+      state: redirect ? Buffer.from(JSON.stringify({ redirect })).toString("base64") : undefined,
     })(req, res, next);
   });
 
   app.get("/api/callback", (req, res, next) => {
     ensureStrategy(req.hostname);
+    const state = req.query.state as string;
+    let successRedirect = "/";
+    if (state) {
+      try {
+        const decoded = JSON.parse(Buffer.from(state, "base64").toString());
+        if (decoded.redirect) successRedirect = decoded.redirect;
+      } catch (e) {}
+    }
     passport.authenticate(`replitauth:${req.hostname}`, {
-      successReturnToOrRedirect: "/",
+      successRedirect,
       failureRedirect: "/api/login",
     })(req, res, next);
   });

@@ -1,14 +1,15 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useParams, useLocation } from "wouter";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { CodeEditor } from "@/components/CodeEditor";
 import { Terminal } from "@/components/Terminal";
 import { AIPanel } from "@/components/AIPanel";
 import { LoginPromptModal } from "@/components/LoginPromptModal";
-import { useProject, useUpdateFile, useCreateFile } from "@/hooks/use-projects";
+import { useProject, useUpdateFile, useCreateFile, useDeleteFile } from "@/hooks/use-projects";
 import { useUsage, useTrackUsage } from "@/hooks/use-usage";
 import { useAuth } from "@/hooks/use-auth";
-import { Code2, Play, Sparkles, Save, FileCode2, ChevronLeft, Download } from "lucide-react";
+import { useTerminalExecute } from "@/hooks/use-terminal";
+import { Code2, Play, Sparkles, Save, FileCode2, ChevronLeft, Download, Edit2, Trash2, Check, X as CloseIcon } from "lucide-react";
 
 export default function EditorWorkspace() {
   const params = useParams();
@@ -24,12 +25,49 @@ export default function EditorWorkspace() {
   const { data: projectData, isLoading: isProjectLoading } = useProject(projectId);
   const updateFileMutation = useUpdateFile();
   const createFileMutation = useCreateFile();
+  const deleteFileMutation = useDeleteFile();
+  const executeMutation = useTerminalExecute();
 
   const [activeFileId, setActiveFileId] = useState<number | null>(null);
   const [localCode, setLocalCode] = useState("");
   const [showAIPanel, setShowAIPanel] = useState(false);
   const [showLoginPrompt, setShowLoginPrompt] = useState(false);
   const [trialExpired, setTrialExpired] = useState(false);
+  const [editingFileId, setEditingFileId] = useState<number | null>(null);
+  const [newFilename, setNewFilename] = useState("");
+
+  const runCode = () => {
+    if (!projectId || !localCode.trim()) return;
+    handleSave();
+    
+    // Determine command based on file extension
+    const file = projectData?.files.find(f => f.id === activeFileId);
+    if (!file) return;
+    
+    let command = "";
+    if (file.filename.endsWith(".js")) command = `node -e '${localCode.replace(/'/g, "'\\''")}'`;
+    else if (file.filename.endsWith(".py")) command = `python3 -c '${localCode.replace(/'/g, "'\\''")}'`;
+    else if (file.filename.endsWith(".ts")) command = `tsx -e '${localCode.replace(/'/g, "'\\''")}'`;
+    else if (file.filename.endsWith(".rs")) command = `rustc - -o /tmp/a.out && /tmp/a.out << 'EOF'\n${localCode}\nEOF`;
+    else if (file.filename.endsWith(".go")) command = `go run - << 'EOF'\n${localCode}\nEOF`;
+    else if (file.filename.endsWith(".java")) command = `java --source 17 - << 'EOF'\n${localCode}\nEOF`;
+    else if (file.filename.endsWith(".cpp")) command = `g++ -x c++ - -o /tmp/a.out && /tmp/a.out << 'EOF'\n${localCode}\nEOF`;
+    
+    if (command) {
+      executeMutation.mutate({ projectId, command });
+    }
+  };
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key.toLowerCase() === 'e' && !['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement).tagName)) {
+        e.preventDefault();
+        runCode();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [projectId, localCode, activeFileId, projectData]);
 
   // Initialize trial for non-auth users
   useEffect(() => {
@@ -70,7 +108,21 @@ export default function EditorWorkspace() {
   }, [projectData, activeFileId]);
 
   const activeFile = projectData?.files.find(f => f.id === activeFileId);
-  const language = projectData?.project.language || "javascript";
+  
+  const getLanguage = (filename: string) => {
+    if (filename.endsWith(".py")) return "python";
+    if (filename.endsWith(".js")) return "javascript";
+    if (filename.endsWith(".ts")) return "typescript";
+    if (filename.endsWith(".html")) return "html";
+    if (filename.endsWith(".css")) return "css";
+    if (filename.endsWith(".rs")) return "rust";
+    if (filename.endsWith(".go")) return "go";
+    if (filename.endsWith(".java")) return "java";
+    if (filename.endsWith(".cpp")) return "cpp";
+    return projectData?.project.language || "javascript";
+  };
+
+  const language = activeFile ? getLanguage(activeFile.filename) : (projectData?.project.language || "javascript");
 
   const handleSave = () => {
     if (!activeFileId) return;
@@ -86,6 +138,18 @@ export default function EditorWorkspace() {
     a.download = activeFile.filename;
     a.click();
     window.URL.revokeObjectURL(url);
+  };
+
+  const startRenaming = (file: any) => {
+    setEditingFileId(file.id);
+    setNewFilename(file.filename);
+  };
+
+  const confirmRename = () => {
+    if (editingFileId && newFilename.trim()) {
+      updateFileMutation.mutate({ id: editingFileId, filename: newFilename });
+      setEditingFileId(null);
+    }
   };
 
   if (isProjectLoading || isAuthLoading) {
@@ -123,6 +187,15 @@ export default function EditorWorkspace() {
         </div>
 
         <div className="flex items-center gap-2 sm:gap-4">
+          <button 
+            onClick={runCode}
+            className="p-1.5 sm:px-3 sm:py-1.5 text-xs font-medium bg-primary text-primary-foreground rounded-md hover:bg-primary/90 flex items-center gap-1.5 transition-colors"
+            title="Run Code (E)"
+          >
+            <Play className="w-3.5 h-3.5 fill-current" />
+            <span className="hidden sm:inline">Run (E)</span>
+          </button>
+
           {/* Usage Badge */}
           {usage && (
             <div className="hidden sm:flex items-center px-2.5 py-1 rounded-full bg-secondary border border-border/50 text-xs font-medium text-muted-foreground">
@@ -161,20 +234,55 @@ export default function EditorWorkspace() {
         <PanelGroup direction="horizontal">
           {/* Sidebar */}
           <Panel defaultSize={15} minSize={10} maxSize={30} className="border-r border-border bg-card/50">
-            <div className="p-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider border-b border-border/50">Explorer</div>
+            <div className="p-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider border-b border-border/50 flex justify-between items-center">
+              Explorer
+              {!isNew && (
+                <button 
+                  onClick={() => {
+                    const filename = `file_${projectData?.files.length || 0}.js`;
+                    createFileMutation.mutate({ projectId: projectId!, filename, content: "" });
+                  }}
+                  className="p-1 hover:bg-secondary rounded text-primary"
+                  title="New File"
+                >
+                  <FileCode2 className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
             <div className="p-2 space-y-1">
               {!isNew && projectData?.files.map(file => (
-                <button
-                  key={file.id}
-                  onClick={() => {
-                    setActiveFileId(file.id);
-                    setLocalCode(file.content);
-                  }}
-                  className={`w-full flex items-center gap-2 px-2 py-1.5 text-sm rounded-md transition-colors ${activeFileId === file.id ? 'bg-primary/10 text-primary font-medium' : 'text-muted-foreground hover:bg-secondary hover:text-foreground'}`}
-                >
-                  <FileCode2 className="w-4 h-4 opacity-70" />
-                  {file.filename}
-                </button>
+                <div key={file.id} className="group relative">
+                  {editingFileId === file.id ? (
+                    <div className="flex items-center gap-1 px-2 py-1 bg-secondary rounded-md">
+                      <input 
+                        autoFocus
+                        value={newFilename}
+                        onChange={(e) => setNewFilename(e.target.value)}
+                        onKeyDown={(e) => e.key === 'Enter' && confirmRename()}
+                        className="bg-transparent border-none text-sm w-full focus:outline-none"
+                      />
+                      <button onClick={confirmRename} className="p-0.5 text-primary"><Check className="w-3 h-3" /></button>
+                      <button onClick={() => setEditingFileId(null)} className="p-0.5 text-destructive"><CloseIcon className="w-3 h-3" /></button>
+                    </div>
+                  ) : (
+                    <div className={`w-full flex items-center justify-between px-2 py-1.5 text-sm rounded-md transition-colors ${activeFileId === file.id ? 'bg-primary/10 text-primary font-medium' : 'text-muted-foreground hover:bg-secondary hover:text-foreground'}`}>
+                      <button
+                        onClick={() => {
+                          setActiveFileId(file.id);
+                          setLocalCode(file.content);
+                        }}
+                        className="flex-1 flex items-center gap-2 text-left"
+                      >
+                        <FileCode2 className="w-4 h-4 opacity-70" />
+                        <span className="truncate">{file.filename}</span>
+                      </button>
+                      <div className="hidden group-hover:flex items-center gap-1">
+                        <button onClick={() => startRenaming(file)} className="p-1 hover:bg-background rounded text-muted-foreground" title="Rename"><Edit2 className="w-3 h-3" /></button>
+                        <button onClick={() => deleteFileMutation.mutate(file.id)} className="p-1 hover:bg-background rounded text-destructive" title="Delete"><Trash2 className="w-3 h-3" /></button>
+                      </div>
+                    </div>
+                  )}
+                </div>
               ))}
               {isNew && (
                 <div className="w-full flex items-center gap-2 px-2 py-1.5 text-sm rounded-md bg-primary/10 text-primary font-medium">

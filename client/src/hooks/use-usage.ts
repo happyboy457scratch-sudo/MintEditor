@@ -13,7 +13,7 @@ export function useUsage() {
       if (!res.ok) throw new Error("Failed to fetch usage");
       return api.usage.check.responses[200].parse(await res.json());
     },
-    refetchInterval: 60000, // Check every minute
+    refetchInterval: 30000, // Check every 30 seconds
   });
 }
 
@@ -56,9 +56,9 @@ export function useCredits() {
 
 export function useSubscription() {
   return useQuery({
-    queryKey: [api.subscription.get.path],
+    queryKey: ["/api/subscription"],
     queryFn: async () => {
-      const res = await fetch(api.subscription.get.path, {
+      const res = await fetch("/api/subscription", {
         headers: getSessionHeaders(),
         credentials: "include",
       });

@@ -40,6 +40,7 @@ export function Terminal({ projectId }: TerminalProps) {
     fitAddon.fit();
     
     term.writeln('\x1b[1;32m Mint Editor Terminal\x1b[0m');
+    term.writeln(' \x1b[1;36mClick E to run your code!\x1b[0m');
     term.writeln(' Type a command and press Enter...');
     term.write('\r\n$ ');
     

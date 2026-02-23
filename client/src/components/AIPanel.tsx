@@ -62,12 +62,12 @@ export function AIPanel({ code, language, onApplyFix, onClose }: AIPanelProps) {
               ? "Sign in to use AI code assistance features." 
               : "You have run out of AI credits for this month."}
           </p>
-          <a 
-            href={!usage?.isAuthenticated ? "/api/login" : "/settings"}
+          <button 
+            onClick={() => window.location.href = `/api/login?redirect=${encodeURIComponent(window.location.pathname)}`}
             className="mt-4 px-4 py-2 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition-colors hover-elevate"
           >
             {!usage?.isAuthenticated ? "Sign In" : "Upgrade Plan"}
-          </a>
+          </button>
         </div>
       ) : (
         <div className="flex flex-col h-full overflow-hidden">
