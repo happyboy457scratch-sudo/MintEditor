@@ -147,10 +147,11 @@ class DatabaseStorage implements IStorage {
       .insert(userCredits)
       .values(credits)
       .onConflictDoUpdate({
-        target: [userCredits.userId, userCredits.monthYear],
+        target: userCredits.userId,
         set: {
           creditsUsed: credits.creditsUsed,
           creditsLimit: credits.creditsLimit,
+          monthYear: credits.monthYear,
           updatedAt: new Date(),
         },
       })
