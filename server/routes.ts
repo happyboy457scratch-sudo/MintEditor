@@ -182,9 +182,21 @@ export async function registerRoutes(
       });
 
       // Create a default file
+      const extensionByLanguage: Record<string, string> = {
+        javascript: "js",
+        typescript: "ts",
+        python: "py",
+        html: "html",
+        css: "css",
+        rust: "rs",
+        go: "go",
+        java: "java",
+        cpp: "cpp",
+      };
+      const extension = extensionByLanguage[input.language || ""] || "txt";
       await storage.createFile({
         projectId: project.id,
-        filename: `main.${input.language === "javascript" ? "js" : input.language === "python" ? "py" : "txt"}`,
+        filename: `main.${extension}`,
         content: `// Welcome to your ${input.language} project!\n\n`,
       });
 

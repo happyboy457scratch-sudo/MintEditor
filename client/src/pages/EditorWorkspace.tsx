@@ -131,11 +131,40 @@ export default function EditorWorkspace() {
 
   const handleDownload = () => {
     if (!activeFile) return;
-    const blob = new Blob([localCode], { type: 'text/plain' });
+    const extensionByLanguage: Record<string, string> = {
+      javascript: "js",
+      typescript: "ts",
+      python: "py",
+      html: "html",
+      css: "css",
+      rust: "rs",
+      go: "go",
+      java: "java",
+      cpp: "cpp",
+    };
+    const languageExtension = projectData?.project.language
+      ? extensionByLanguage[projectData.project.language]
+      : undefined;
+    const filename =
+      activeFile.filename.toLowerCase().endsWith(".txt") && languageExtension
+        ? activeFile.filename.replace(/\.txt$/i, `.${languageExtension}`)
+        : activeFile.filename;
+    const extension = filename.split(".").pop()?.toLowerCase();
+    const mimeTypeByExtension: Record<string, string> = {
+      html: "text/html;charset=utf-8",
+      htm: "text/html;charset=utf-8",
+      css: "text/css;charset=utf-8",
+      js: "text/javascript;charset=utf-8",
+      json: "application/json;charset=utf-8",
+      xml: "application/xml;charset=utf-8",
+    };
+    const blob = new Blob([localCode], {
+      type: (extension && mimeTypeByExtension[extension]) || "text/plain;charset=utf-8",
+    });
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = activeFile.filename;
+    a.download = filename;
     a.click();
     window.URL.revokeObjectURL(url);
   };
