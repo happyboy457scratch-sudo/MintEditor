@@ -201,6 +201,22 @@ export const api = {
         403: errorSchemas.forbidden,
       },
     },
+    generateProgram: {
+      method: "POST" as const,
+      path: "/api/ai/generate-program" as const,
+      input: z.object({
+        prompt: z.string().trim().min(3).max(4000),
+        language: z.string().trim().min(1).max(50),
+      }),
+      responses: {
+        200: z.object({
+          code: z.string(),
+          filename: z.string(),
+        }),
+        400: errorSchemas.validation,
+        403: errorSchemas.forbidden,
+      },
+    },
   },
 
   // Usage & Credits

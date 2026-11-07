@@ -9,6 +9,7 @@ import { useProject, useUpdateFile, useCreateFile, useDeleteFile } from "@/hooks
 import { useUsage, useTrackUsage } from "@/hooks/use-usage";
 import { useAuth } from "@/hooks/use-auth";
 import { useTerminalExecute } from "@/hooks/use-terminal";
+import { useToast } from "@/hooks/use-toast";
 import { Code2, Play, Sparkles, Save, FileCode2, ChevronLeft, Download, Edit2, Trash2, Check, X as CloseIcon } from "lucide-react";
 
 export default function EditorWorkspace() {
@@ -27,6 +28,7 @@ export default function EditorWorkspace() {
   const createFileMutation = useCreateFile();
   const deleteFileMutation = useDeleteFile();
   const executeMutation = useTerminalExecute();
+  const { toast } = useToast();
 
   const [activeFileId, setActiveFileId] = useState<number | null>(null);
   const [localCode, setLocalCode] = useState("");
@@ -127,6 +129,51 @@ export default function EditorWorkspace() {
   const handleSave = () => {
     if (!activeFileId) return;
     updateFileMutation.mutate({ id: activeFileId, content: localCode });
+  };
+
+  const handleCreateProgram = (filename: string, content: string) => {
+    if (!projectId) {
+      setLocalCode(content);
+      setShowAIPanel(false);
+      toast({
+        title: "Program added to the editor",
+        description: "Create a project to save this file permanently.",
+      });
+      return;
+    }
+
+    const cleanedFilename =
+      filename.replace(/[\\/<>:"|?*\u0000-\u001f]/g, "-").trim().replace(/^\.+$/, "") ||
+      "assistant-program.js";
+    const existingNames = new Set((projectData?.files || []).map((file) => file.filename.toLowerCase()));
+    const extensionIndex = cleanedFilename.lastIndexOf(".");
+    const stem = extensionIndex > 0 ? cleanedFilename.slice(0, extensionIndex) : cleanedFilename;
+    const extension = extensionIndex > 0 ? cleanedFilename.slice(extensionIndex) : "";
+    let uniqueFilename = cleanedFilename;
+    let suffix = 2;
+    while (existingNames.has(uniqueFilename.toLowerCase())) {
+      uniqueFilename = `${stem}-${suffix}${extension}`;
+      suffix += 1;
+    }
+
+    createFileMutation.mutate(
+      { projectId, filename: uniqueFilename, content },
+      {
+        onSuccess: (file) => {
+          setActiveFileId(file.id);
+          setLocalCode(file.content);
+          setShowAIPanel(false);
+          toast({ title: "Program created", description: `${uniqueFilename} was added to your workspace.` });
+        },
+        onError: () => {
+          toast({
+            title: "Could not create the program",
+            description: "The generated code is still available in the assistant. Please try again.",
+            variant: "destructive",
+          });
+        },
+      },
+    );
   };
 
   const handleDownload = () => {
@@ -370,6 +417,8 @@ export default function EditorWorkspace() {
             code={displayCode} 
             language={displayLang} 
             onApplyFix={(fixedCode) => setLocalCode(fixedCode)}
+            onCreateProgram={handleCreateProgram}
+            isCreatingProgram={createFileMutation.isPending}
             onClose={() => setShowAIPanel(false)} 
           />
         )}

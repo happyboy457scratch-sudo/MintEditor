@@ -1,29 +1,49 @@
 import React, { useState } from "react";
-import { Sparkles, X, MessageSquare, AlertCircle, Wand2, Loader2 } from "lucide-react";
-import { useAIFixCode, useAIExplainError, useAIImproveCode } from "@/hooks/use-ai";
+import { Sparkles, X, MessageSquare, AlertCircle, Wand2, Loader2, FileCode2 } from "lucide-react";
+import { useAIFixCode, useAIExplainError, useAIImproveCode, useAIGenerateProgram } from "@/hooks/use-ai";
 import { useUsage } from "@/hooks/use-usage";
 
 interface AIPanelProps {
   code: string;
   language: string;
   onApplyFix: (code: string) => void;
+  onCreateProgram: (filename: string, code: string) => void;
+  isCreatingProgram: boolean;
   onClose: () => void;
 }
 
-export function AIPanel({ code, language, onApplyFix, onClose }: AIPanelProps) {
-  const [activeTab, setActiveTab] = useState<"fix" | "explain" | "improve">("improve");
+export function AIPanel({ code, language, onApplyFix, onCreateProgram, isCreatingProgram, onClose }: AIPanelProps) {
+  const [activeTab, setActiveTab] = useState<"create" | "fix" | "explain" | "improve">("create");
   const [errorInput, setErrorInput] = useState("");
+  const [programPrompt, setProgramPrompt] = useState("");
+  const [generatedFilename, setGeneratedFilename] = useState("");
+  const [generateError, setGenerateError] = useState("");
   const [result, setResult] = useState<any>(null);
 
   const { data: usage } = useUsage();
   const fixMutation = useAIFixCode();
   const explainMutation = useAIExplainError();
   const improveMutation = useAIImproveCode();
+  const generateMutation = useAIGenerateProgram();
 
-  const isPending = fixMutation.isPending || explainMutation.isPending || improveMutation.isPending;
+  const isPending = fixMutation.isPending || explainMutation.isPending || improveMutation.isPending || generateMutation.isPending;
 
   const handleAction = () => {
     setResult(null);
+    setGenerateError("");
+    if (activeTab === "create") {
+      generateMutation.mutate(
+        { prompt: programPrompt, language },
+        {
+          onSuccess: (data) => {
+            setResult(data);
+            setGeneratedFilename(data.filename);
+          },
+          onError: (error) => setGenerateError(error.message),
+        },
+      );
+      return;
+    }
     if (activeTab === "fix") {
       fixMutation.mutate({ code, language, error: errorInput }, {
         onSuccess: (data) => setResult(data)
@@ -73,14 +93,19 @@ export function AIPanel({ code, language, onApplyFix, onClose }: AIPanelProps) {
         <div className="flex flex-col h-full overflow-hidden">
           <div className="flex p-2 gap-1 border-b border-border/50 bg-background/50">
             {[
+              { id: "create", label: "Create", icon: FileCode2 },
               { id: "improve", label: "Improve", icon: Wand2 },
               { id: "fix", label: "Fix Code", icon: Sparkles },
               { id: "explain", label: "Explain", icon: MessageSquare },
             ].map(tab => (
               <button
                 key={tab.id}
-                onClick={() => setActiveTab(tab.id as any)}
-                className={`flex-1 py-1.5 px-2 text-xs font-medium rounded-md flex items-center justify-center gap-1.5 transition-colors ${
+                onClick={() => {
+                  setActiveTab(tab.id as typeof activeTab);
+                  setResult(null);
+                  setGenerateError("");
+                }}
+                className={`flex-1 py-1.5 px-1 text-[11px] font-medium rounded-md flex items-center justify-center gap-1 transition-colors ${
                   activeTab === tab.id 
                     ? "bg-primary text-primary-foreground shadow-sm shadow-primary/20" 
                     : "text-muted-foreground hover:text-foreground hover:bg-secondary"
@@ -93,6 +118,21 @@ export function AIPanel({ code, language, onApplyFix, onClose }: AIPanelProps) {
           </div>
 
           <div className="flex-1 overflow-y-auto p-4 space-y-4">
+            {activeTab === "create" && (
+              <div className="space-y-2">
+                <label className="text-xs font-medium text-muted-foreground">
+                  Describe the program to build ({language})
+                </label>
+                <textarea
+                  value={programPrompt}
+                  onChange={(e) => setProgramPrompt(e.target.value)}
+                  placeholder="For example: Create a to-do list with add, complete, and delete actions."
+                  maxLength={4000}
+                  className="w-full bg-background border border-border rounded-lg p-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary min-h-[120px] resize-y"
+                />
+              </div>
+            )}
+
             {(activeTab === "fix" || activeTab === "explain") && (
               <div className="space-y-2">
                 <label className="text-xs font-medium text-muted-foreground">What error are you seeing? (Optional)</label>
@@ -107,16 +147,45 @@ export function AIPanel({ code, language, onApplyFix, onClose }: AIPanelProps) {
 
             <button
               onClick={handleAction}
-              disabled={isPending || !code.trim()}
+              disabled={isPending || (activeTab === "create" ? programPrompt.trim().length < 3 : !code.trim())}
               className="w-full py-2.5 bg-secondary text-foreground font-medium rounded-lg hover:bg-secondary/80 disabled:opacity-50 transition-all border border-border/50 flex items-center justify-center gap-2 shadow-sm"
             >
               {isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4 text-primary" />}
-              {isPending ? "Thinking..." : "Run AI Assistant"}
+              {isPending ? "Thinking..." : activeTab === "create" ? "Generate Program" : "Run AI Assistant"}
             </button>
+
+            {generateError && activeTab === "create" && (
+              <p role="alert" className="text-sm text-destructive">{generateError}</p>
+            )}
 
             {/* Results Display */}
             {result && (
               <div className="mt-6 space-y-4 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                {activeTab === "create" && result.code && (
+                  <div className="space-y-3">
+                    <h3 className="text-sm font-semibold border-b border-border pb-1">Program generated</h3>
+                    <label className="block space-y-1">
+                      <span className="text-xs font-medium text-muted-foreground">File name</span>
+                      <input
+                        value={generatedFilename}
+                        onChange={(e) => setGeneratedFilename(e.target.value)}
+                        className="w-full bg-background border border-border rounded-md px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+                        maxLength={100}
+                      />
+                    </label>
+                    <pre className="max-h-56 overflow-auto rounded-lg border border-border bg-background p-3 text-xs leading-relaxed">
+                      <code>{result.code}</code>
+                    </pre>
+                    <button
+                      onClick={() => onCreateProgram(generatedFilename.trim(), result.code)}
+                      disabled={!generatedFilename.trim() || isCreatingProgram}
+                      className="w-full py-2 bg-primary text-primary-foreground rounded-lg text-sm font-medium hover:bg-primary/90 disabled:opacity-50 transition-colors"
+                    >
+                      {isCreatingProgram ? "Creating File..." : "Create File in Workspace"}
+                    </button>
+                  </div>
+                )}
+
                 {activeTab === "improve" && result.suggestions && (
                   <div className="space-y-3">
                     <h3 className="text-sm font-semibold border-b border-border pb-1">Suggestions</h3>

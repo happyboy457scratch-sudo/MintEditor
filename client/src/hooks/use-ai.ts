@@ -64,3 +64,26 @@ export function useAIImproveCode() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: [api.usage.check.path] }),
   });
 }
+
+export function useAIGenerateProgram() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (data: { prompt: string; language: string }) => {
+      const res = await fetch(api.ai.generateProgram.path, {
+        method: api.ai.generateProgram.method,
+        headers: {
+          "Content-Type": "application/json",
+          ...getSessionHeaders(),
+        },
+        body: JSON.stringify(data),
+        credentials: "include",
+      });
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({}));
+        throw new Error(error.message || "AI request failed");
+      }
+      return api.ai.generateProgram.responses[200].parse(await res.json());
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: [api.usage.check.path] }),
+  });
+}

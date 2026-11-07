@@ -497,6 +497,70 @@ export async function registerRoutes(
     }
   });
 
+  app.post(api.ai.generateProgram.path, async (req: any, res) => {
+    try {
+      const userId = req.user?.claims?.sub;
+      if (!userId) {
+        return res.status(403).json({ message: "Sign in to use AI features" });
+      }
+
+      const { canUseAI } = await checkUsageLimits(userId);
+      if (!canUseAI) {
+        return res.status(403).json({ message: "Out of AI credits. Upgrade to continue." });
+      }
+
+      const input = api.ai.generateProgram.input.parse(req.body);
+      const response = await openai.chat.completions.create({
+        model: "gpt-5.2",
+        messages: [
+          {
+            role: "system",
+            content: `Create one complete, runnable ${input.language} source file from the user's requirements. Return only source code, without Markdown fences or explanations. Make reasonable assumptions and implement a working solution rather than placeholders. For HTML, include any required styling and browser-side JavaScript in the same standalone file.`,
+          },
+          { role: "user", content: input.prompt },
+        ],
+        temperature: 0.3,
+      });
+
+      const rawCode = response.choices[0]?.message?.content?.trim();
+      if (!rawCode) {
+        return res.status(502).json({ message: "The AI did not return program code. Please try again." });
+      }
+
+      const code = rawCode
+        .replace(/^```[^\n]*\n?/, "")
+        .replace(/\n?```\s*$/, "")
+        .trim();
+      const extensionByLanguage: Record<string, string> = {
+        javascript: "js",
+        typescript: "ts",
+        python: "py",
+        html: "html",
+        css: "css",
+        rust: "rs",
+        go: "go",
+        java: "java",
+        cpp: "cpp",
+      };
+      const extension = extensionByLanguage[input.language.toLowerCase()] || "txt";
+      const filename = `assistant-program.${extension}`;
+
+      const monthYear = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}`;
+      await storage.incrementCreditsUsed(userId, monthYear, 1);
+
+      res.json({ code, filename });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({
+          message: error.errors[0].message,
+          field: error.errors[0].path.join("."),
+        });
+      }
+      console.error("Error generating program:", error);
+      res.status(500).json({ message: "Failed to generate program" });
+    }
+  });
+
   // Usage tracking
   app.get(api.usage.check.path, async (req: any, res) => {
     try {
