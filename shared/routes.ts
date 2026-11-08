@@ -92,6 +92,21 @@ export const api = {
         400: errorSchemas.validation,
       },
     },
+    upload: {
+      method: "POST" as const,
+      path: "/api/projects/:projectId/files/upload" as const,
+      input: z.object({
+        filename: z.string().min(1).max(255),
+        content: z.string(),
+      }),
+      responses: {
+        201: z.custom<typeof codeFiles.$inferSelect>(),
+        400: errorSchemas.validation,
+        403: errorSchemas.forbidden,
+        404: errorSchemas.notFound,
+        413: errorSchemas.validation,
+      },
+    },
     update: {
       method: "PUT" as const,
       path: "/api/files/:id" as const,

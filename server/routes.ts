@@ -7,11 +7,13 @@ import { spawn } from "child_process";
 import OpenAI from "openai";
 import { setupAuth, isAuthenticated, registerAuthRoutes } from "./replit_integrations/auth";
 import { randomUUID } from "crypto";
+import { isAllowedSourceFile, SOURCE_FILE_UPLOAD_MAX_BYTES, SOURCE_FILE_FORMATS_LABEL } from "@shared/file-types";
 
-const openai = new OpenAI({
-  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
-  baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
+const groq = new OpenAI({
+  apiKey: process.env.GROQ_API_KEY,
+  baseURL: "https://api.groq.com/openai/v1",
 });
+const GROQ_MODEL = "openai/gpt-oss-20b";
 
 import { createPaypalOrder, capturePaypalOrder, loadPaypalDefault } from "./paypal";
 
@@ -267,6 +269,57 @@ export async function registerRoutes(
     }
   });
 
+  app.post(api.files.upload.path, async (req, res) => {
+    try {
+      const projectId = parseInt(req.params.projectId);
+      const input = api.files.upload.input.parse(req.body);
+      const project = await storage.getProject(projectId);
+
+      if (!project) {
+        return res.status(404).json({ message: "Project not found" });
+      }
+
+      const { userId, sessionId } = getUserOrSession(req);
+      const ownsProject = project.userId
+        ? project.userId === userId
+        : project.sessionId === sessionId;
+      if (!ownsProject) {
+        return res.status(403).json({ message: "You do not have access to this project" });
+      }
+
+      if (!isAllowedSourceFile(input.filename) || /[\\/]/.test(input.filename)) {
+        return res.status(400).json({
+          message: `Unsupported file type. Allowed formats: ${SOURCE_FILE_FORMATS_LABEL}.`,
+        });
+      }
+
+      if (Buffer.byteLength(input.content, "utf8") > SOURCE_FILE_UPLOAD_MAX_BYTES) {
+        return res.status(413).json({ message: "Each uploaded source file must be 1 MB or smaller." });
+      }
+
+      if (input.content.includes("\0")) {
+        return res.status(400).json({ message: "Binary files are not supported; upload a text source file." });
+      }
+
+      const file = await storage.createFile({
+        projectId,
+        filename: input.filename,
+        content: input.content,
+      });
+
+      res.status(201).json(file);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({
+          message: error.errors[0].message,
+          field: error.errors[0].path.join("."),
+        });
+      }
+      console.error("Error uploading source file:", error);
+      res.status(500).json({ message: "Failed to upload source file" });
+    }
+  });
+
   app.put(api.files.update.path, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
@@ -379,8 +432,8 @@ export async function registerRoutes(
         ? `Fix this ${input.language} code that produces the error: "${input.error}"\n\nCode:\n${input.code}\n\nProvide the fixed code and a brief explanation.`
         : `Review and fix any bugs in this ${input.language} code:\n\n${input.code}\n\nProvide the fixed code and a brief explanation.`;
 
-      const response = await openai.chat.completions.create({
-        model: "gpt-5.2",
+      const response = await groq.chat.completions.create({
+        model: GROQ_MODEL,
         messages: [{ role: "user", content: prompt }],
         temperature: 0.3,
       });
@@ -424,8 +477,8 @@ export async function registerRoutes(
 
       const prompt = `Explain this ${input.language} error in simple terms:\n\nError: ${input.error}\n\nCode:\n${input.code}`;
 
-      const response = await openai.chat.completions.create({
-        model: "gpt-5.2",
+      const response = await groq.chat.completions.create({
+        model: GROQ_MODEL,
         messages: [{ role: "user", content: prompt }],
         temperature: 0.5,
       });
@@ -465,8 +518,8 @@ export async function registerRoutes(
 
       const prompt = `Improve this ${input.language} code for better performance, readability, and best practices:\n\n${input.code}\n\nProvide the improved code and list the improvements made.`;
 
-      const response = await openai.chat.completions.create({
-        model: "gpt-5.2",
+      const response = await groq.chat.completions.create({
+        model: GROQ_MODEL,
         messages: [{ role: "user", content: prompt }],
         temperature: 0.3,
       });
@@ -510,8 +563,8 @@ export async function registerRoutes(
       }
 
       const input = api.ai.generateProgram.input.parse(req.body);
-      const response = await openai.chat.completions.create({
-        model: "gpt-5.2",
+      const response = await groq.chat.completions.create({
+        model: GROQ_MODEL,
         messages: [
           {
             role: "system",

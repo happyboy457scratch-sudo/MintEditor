@@ -1,0 +1,1 @@
+- [AI cost policy](ai-cost-policy.md) — use Groq for coding assistance to honor the user's no-spend requirement.

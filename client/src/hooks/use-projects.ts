@@ -100,6 +100,32 @@ export function useCreateFile() {
   });
 }
 
+export function useUploadFile() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ projectId, ...data }: FileInput & { projectId: number }) => {
+      const url = buildUrl(api.files.upload.path, { projectId });
+      const res = await fetch(url, {
+        method: api.files.upload.method,
+        headers: {
+          "Content-Type": "application/json",
+          ...getSessionHeaders(),
+        },
+        body: JSON.stringify(data),
+        credentials: "include",
+      });
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({}));
+        throw new Error(error.message || "Failed to upload source file");
+      }
+      return api.files.upload.responses[201].parse(await res.json());
+    },
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: [api.projects.get.path, variables.projectId] });
+    },
+  });
+}
+
 export function useUpdateFile() {
   const queryClient = useQueryClient();
   return useMutation({

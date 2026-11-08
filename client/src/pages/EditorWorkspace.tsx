@@ -5,12 +5,13 @@ import { CodeEditor } from "@/components/CodeEditor";
 import { Terminal } from "@/components/Terminal";
 import { AIPanel } from "@/components/AIPanel";
 import { LoginPromptModal } from "@/components/LoginPromptModal";
-import { useProject, useUpdateFile, useCreateFile, useDeleteFile } from "@/hooks/use-projects";
+import { useProject, useUpdateFile, useCreateFile, useUploadFile, useDeleteFile } from "@/hooks/use-projects";
 import { useUsage, useTrackUsage } from "@/hooks/use-usage";
 import { useAuth } from "@/hooks/use-auth";
 import { useTerminalExecute } from "@/hooks/use-terminal";
 import { useToast } from "@/hooks/use-toast";
-import { Code2, Play, Sparkles, Save, FileCode2, ChevronLeft, Download, Edit2, Trash2, Check, X as CloseIcon } from "lucide-react";
+import { Code2, Play, Sparkles, Save, FileCode2, ChevronLeft, Download, Edit2, Trash2, Check, X as CloseIcon, Upload, Loader2 } from "lucide-react";
+import { SOURCE_FILE_ACCEPT, SOURCE_FILE_FORMATS_LABEL, SOURCE_FILE_UPLOAD_MAX_BYTES, isAllowedSourceFile } from "@shared/file-types";
 
 export default function EditorWorkspace() {
   const params = useParams();
@@ -26,6 +27,7 @@ export default function EditorWorkspace() {
   const { data: projectData, isLoading: isProjectLoading } = useProject(projectId);
   const updateFileMutation = useUpdateFile();
   const createFileMutation = useCreateFile();
+  const uploadFileMutation = useUploadFile();
   const deleteFileMutation = useDeleteFile();
   const executeMutation = useTerminalExecute();
   const { toast } = useToast();
@@ -37,6 +39,8 @@ export default function EditorWorkspace() {
   const [trialExpired, setTrialExpired] = useState(false);
   const [editingFileId, setEditingFileId] = useState<number | null>(null);
   const [newFilename, setNewFilename] = useState("");
+  const [isUploadingFiles, setIsUploadingFiles] = useState(false);
+  const uploadInputRef = useRef<HTMLInputElement>(null);
 
   const runCode = () => {
     if (!projectId || !localCode.trim()) return;
@@ -129,6 +133,94 @@ export default function EditorWorkspace() {
   const handleSave = () => {
     if (!activeFileId) return;
     updateFileMutation.mutate({ id: activeFileId, content: localCode });
+  };
+
+  const handleUploadFiles = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const selectedFiles = Array.from(event.currentTarget.files || []);
+    event.currentTarget.value = "";
+    if (!projectId || selectedFiles.length === 0) return;
+
+    const rejectedFiles = selectedFiles.filter(
+      (file) => !isAllowedSourceFile(file.name) || file.size > SOURCE_FILE_UPLOAD_MAX_BYTES,
+    );
+    const validFiles = selectedFiles.filter(
+      (file) => isAllowedSourceFile(file.name) && file.size <= SOURCE_FILE_UPLOAD_MAX_BYTES,
+    );
+
+    if (validFiles.length === 0) {
+      toast({
+        title: "No supported files selected",
+        description: `Allowed: ${SOURCE_FILE_FORMATS_LABEL}. Maximum size: 1 MB per file.`,
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsUploadingFiles(true);
+    const existingNames = new Set((projectData?.files || []).map((file) => file.filename.toLowerCase()));
+    const uploadedFiles: Array<{ id: number; filename: string; content: string }> = [];
+    const issues = rejectedFiles.map((file) =>
+      file.size > SOURCE_FILE_UPLOAD_MAX_BYTES
+        ? `${file.name} (over 1 MB)`
+        : `${file.name} (unsupported format)`,
+    );
+
+    try {
+      for (const file of validFiles) {
+        try {
+          const content = await file.text();
+          if (content.includes("\0")) {
+            issues.push(`${file.name} (binary file)`);
+            continue;
+          }
+
+          const extensionIndex = file.name.lastIndexOf(".");
+          const stem = extensionIndex > 0 ? file.name.slice(0, extensionIndex) : file.name;
+          const extension = extensionIndex > 0 ? file.name.slice(extensionIndex).toLowerCase() : "";
+          let filename = `${stem}${extension}`;
+          let suffix = 2;
+          while (existingNames.has(filename.toLowerCase())) {
+            filename = `${stem}-${suffix}${extension}`;
+            suffix += 1;
+          }
+          existingNames.add(filename.toLowerCase());
+
+          const uploadedFile = await uploadFileMutation.mutateAsync({
+            projectId,
+            filename,
+            content,
+          });
+          uploadedFiles.push(uploadedFile);
+        } catch (error) {
+          issues.push(`${file.name} (upload failed)`);
+          console.error("File upload failed:", error);
+        }
+      }
+
+      const lastUploadedFile = uploadedFiles[uploadedFiles.length - 1];
+      if (lastUploadedFile) {
+        setActiveFileId(lastUploadedFile.id);
+        setLocalCode(lastUploadedFile.content);
+      }
+
+      if (uploadedFiles.length > 0) {
+        toast({
+          title: `${uploadedFiles.length} file${uploadedFiles.length === 1 ? "" : "s"} uploaded`,
+          description: issues.length
+            ? `Skipped: ${issues.slice(0, 3).join(", ")}${issues.length > 3 ? ", and more" : ""}`
+            : "The files are now in your project.",
+          variant: issues.length ? "destructive" : "default",
+        });
+      } else {
+        toast({
+          title: "No files were uploaded",
+          description: issues.slice(0, 3).join(", ") || "Please try again.",
+          variant: "destructive",
+        });
+      }
+    } finally {
+      setIsUploadingFiles(false);
+    }
   };
 
   const handleCreateProgram = (filename: string, content: string) => {
@@ -313,16 +405,38 @@ export default function EditorWorkspace() {
             <div className="p-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider border-b border-border/50 flex justify-between items-center">
               Explorer
               {!isNew && (
-                <button 
-                  onClick={() => {
-                    const filename = `file_${projectData?.files.length || 0}.js`;
-                    createFileMutation.mutate({ projectId: projectId!, filename, content: "" });
-                  }}
-                  className="p-1 hover:bg-secondary rounded text-primary"
-                  title="New File"
-                >
-                  <FileCode2 className="w-3.5 h-3.5" />
-                </button>
+                <div className="flex items-center gap-1">
+                  <input
+                    ref={uploadInputRef}
+                    type="file"
+                    accept={SOURCE_FILE_ACCEPT}
+                    multiple
+                    className="hidden"
+                    aria-label="Choose source files to upload"
+                    onChange={handleUploadFiles}
+                  />
+                  <button
+                    onClick={() => uploadInputRef.current?.click()}
+                    disabled={isUploadingFiles}
+                    className="p-1 hover:bg-secondary rounded text-primary disabled:opacity-50"
+                    title={`Upload source files (${SOURCE_FILE_FORMATS_LABEL}; max 1 MB each)`}
+                    aria-label="Upload source files"
+                  >
+                    {isUploadingFiles ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
+                  </button>
+                  <button
+                    onClick={() => {
+                      const filename = `file_${projectData?.files.length || 0}.js`;
+                      createFileMutation.mutate({ projectId: projectId!, filename, content: "" });
+                    }}
+                    disabled={isUploadingFiles || createFileMutation.isPending}
+                    className="p-1 hover:bg-secondary rounded text-primary disabled:opacity-50"
+                    title="New File"
+                    aria-label="New file"
+                  >
+                    <FileCode2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
               )}
             </div>
             <div className="p-2 space-y-1">
